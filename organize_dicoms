@@ -1,0 +1,50 @@
+import pydicom
+import shutil
+import os
+from os import path
+
+class SortDicoms:
+
+    def __init__(self):
+        self.wd=r'C:\Users\sanfordt\Desktop\ST000001'
+        self.outfile_name=r'C:\Users\sanfordt\Desktop\5_5_20_MRI'
+
+    def sort_all(self,dir):
+        '''recursively searches for all dicoms and sorts them
+        **note, right now assumes all files that are not directories are
+        '''
+
+        for file in os.listdir(dir):
+            if path.isdir(path.join(dir,file)):
+                self.sort_all(path.join(dir,file))
+            else:
+                self.sort_dcm(filepath=path.join(dir,file))
+
+
+    def sort_dcm(self,filepath):
+        '''
+        makes new directories if not already present and copies the dicom files to the new directory
+        :return:
+        '''
+
+        filename=path.basename(filepath)
+        file_l=pydicom.dcmread(filepath)
+        try:
+            series=file_l[0x008,0x103e].value
+            series_n = self.remove_chars(series)  # removes strange characters
+            series_names = os.listdir(os.path.join(self.outfile_name))
+            if series_n not in series_names:
+                os.mkdir(os.path.join(self.outfile_name, series_n))
+            shutil.copy2(filepath, os.path.join(self.outfile_name, series_n, filename))
+        except:
+            print("series {} failure".format(filepath))
+
+
+    def remove_chars(self,subj):
+        '''remvoe specific characters to prevent issues with saving'''
+        sc = set([':', '-', '_', '--','&','=','@','/','\\','+','(',')'])
+        return ''.join([c for c in subj if c not in sc])
+
+
+if __name__=='__main__':
+    SortDicoms().sort_all(dir=r'C:\Users\sanfordt\Desktop\ST000001')
