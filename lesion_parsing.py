@@ -11,8 +11,8 @@ import xml.etree.ElementTree as ET
 class FindSeg:
 
     def __init__(self):
-        self.basePATH = '/Volumes/G-SPEED Shuttle TB3/sorted_dicoms'
-        self.savePATH='/Users/sanforth/Desktop/awesome'
+        self.basePATH = ''
+        self.savePATH=''
 
     def process_all(self):
         ''' interates over all patients in directory and creates '''
