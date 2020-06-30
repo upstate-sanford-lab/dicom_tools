@@ -1,82 +1,100 @@
 import os
 import numpy as np
-import struct
 import pydicom
-from stl import mesh
-from mpl_toolkits import mplot3d
-from matplotlib import pyplot
-from struct import pack, unpack
-
+import shutil
+from struct import unpack
+from scipy import ndimage
+import SimpleITK as sitk
+import xml.etree.ElementTree as ET
 
 
 class FindSeg:
 
     def __init__(self):
-        self.basePATH = '/Volumes/G-SPEED Shuttle TB3'
+        self.basePATH = '/Volumes/G-SPEED Shuttle TB3/sorted_dicoms'
+        self.savePATH='/Users/sanforth/Desktop/awesome'
 
-    def lets_see_prostate(self):
-        RTS = os.path.join(os.path.dirname(self.basePATH), 'sorted_dicoms', '004462', '20191018','DCAD STL Prostate Boundary')
-        t2 = os.path.join(os.path.dirname(self.basePATH), 'sorted_dicoms', '004462', '20191018', 'T2 Ax')
-        save = os.path.join(os.path.dirname(self.basePATH), 'sorted_dicoms', '004462', '20191018', 'RTS_out')
-        RTS_f = os.path.join(RTS, os.listdir(RTS)[0])
-        dcm_obj = pydicom.dcmread(RTS_f)
+    def process_all(self):
+        ''' interates over all patients in directory and creates '''
 
-        subs = dcm_obj[0x42011020].value[0]
-        print(subs)
-        array = bytearray(subs[0x42011201].value)
+        for pt in os.listdir(self.basePATH)[0:10]:
+            for dt in os.listdir(os.path.join(self.basePATH,pt)):
+                for series in os.listdir(os.path.join(self.basePATH,pt,dt)):
 
-        with open("'/Users/sanforth/Desktop/stl/prostate2.bin", "wb") as file:
-            file.write(pack("<IIIII", *bytearray()))
+                    if series=='DCAD ROI':
+                        roi_fn=[file for file in os.listdir(os.path.join(self.basePATH,pt,dt,series)) if file.endswith('.dcm')][0]
+                        roi_fp=os.path.join(self.basePATH,pt,dt,series,roi_fn)
 
-        print(len(array))
-        print(len(array[0:80]))
-
-
-        stl.Base
-        t_mesh = stl.mesh.Mesh.from_file('/Users/sanforth/Desktop/stl/prostate2.stl')
-
-        figure = plt.figure()
-        axes = mplot3d.Axes3D(figure)
-        axes.add_collection3d(mplot3d.art3d.Poly3DCollection(t_mesh.vectors))
-        scale = t_mesh.points.flatten()
-        axes.auto_scale_xyz(scale, scale, scale)
-
-        # pyplot.show()
+                        #set up file structure (if it does not already exist
+                        if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt)):
+                            os.mkdir(os.path.join(self.savePATH,pt+'_'+dt))
+                            if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'roi')):
+                                os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'roi'))
+                            if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'nifti')):
+                                os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'nifti'))
+                                if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'nifti','mask')):
+                                    os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'nifti','mask'))
+                            if not os.path.exists(os.path.join(self.savePATH, pt + '_' + dt, 'dicom')):
+                                os.mkdir(os.path.join(self.savePATH, pt + '_' + dt, 'dicom'))
+                                if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'nifti','t2')):
+                                    os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'nifti','t2'))
 
 
-    def lets_see_tumor(self):
-        '''
+                        #copy ROI file to new location
+                        shutil.copy2(roi_fp,os.path.join(self.savePATH,pt+'_'+dt,'roi'))
 
-        :return:
-        '''
+                        #set up all paths for saving
+                        stl_fp=os.path.join(self.savePATH,pt+'_'+dt,'roi')
+                        t2_fp=os.path.join(self.savePATH,pt+'_'+dt,'dicom','t2')
+                        nii_fp=os.path.join(self.savePATH,pt+'_'+dt,'nifti','mask')
 
-        id='004462'
-        RTS = os.path.join(os.path.join(self.basePATH, 'sorted_dicoms', id, '20191018','DCAD ROI'))
-        save = os.path.join(os.path.join(self.basePATH, 'sorted_dicoms', id, '20191018', 'RTS_out'))
+                        self.convert_stl_to_nifti(roi_fp, stl_fp, t2_fp, nii_fp)
 
-        # get dicom object
-        RTS_f = os.path.join(RTS, os.listdir(RTS)[0])
-        dcm_obj = pydicom.dcmread(RTS_f)
 
-        # get dicom info and save as binary array
-        subs = dcm_obj[0x42011020].value[0]
-        array = bytearray(subs[0x42011201].value)
-        f = open('/Users/sanforth/Desktop/stl/tumor2.stl', 'w+b')
-        f.write(array)
+    def convert_stl_to_nifti(self, roi_fp, stl_fp, t2_fp,nii_fp):
+        ''' convert things '''
 
-        num,h,p,n,v0,v1,v2=self.BinarySTL('/Users/sanforth/Desktop/stl/tumor2.stl')
+        #get STL info
+        self.extract_stl(roi_fp,stl_fp)
+        stl_files = [file for file in os.listdir(stl_fp) if file.endswith('.stl')]
+        for stl_file in stl_files:
+            stl_fp_l=os.path.join(stl_fp,stl_file)
+            num, h, p, n, v0, v1, v2 = self.BinarySTL(stl_fp_l)
+            all_verts = np.concatenate((v0,v1,v2))
 
-        VERTICE_COUNT = num
-        data = np.zeros(VERTICE_COUNT, dtype=mesh.Mesh.dtype)
-        your_mesh = mesh.Mesh(data, remove_empty_areas=False)
+            #get T2 dicom info
+            reader = sitk.ImageSeriesReader()
+            dicom_names = reader.GetGDCMSeriesFileNames(t2_fp)
+            reader.SetFileNames(dicom_names)
+            image = reader.Execute()
 
-        # The mesh normals (calculated automatically)
-        your_mesh.normals=n
-        # The mesh vectors
-        your_mesh.v0=v0; your_mesh.v1=v1; your_mesh.v2=v2
+            #create mask from image file
+            img_array = sitk.GetArrayFromImage(image)
+            img_array = np.swapaxes(img_array, 2, 0)
+            mask_array = np.zeros(img_array.shape)
+            #this is not very elegant, basically cast all individual points to their matrix index
+            for vertex in all_verts:
+                ind = np.round(np.asarray(image.TransformPhysicalPointToContinuousIndex(vertex.tolist())),1)
+                if ind[2].is_integer(): #skip indices that are inbetween z slices (interpolated probably)
+                    mask_array[int(ind[0]),int(ind[1]),int(ind[2])]=1
 
-        your_mesh.save('/Users/sanforth/Desktop/stl/tumor2_new.stl')
+            #the previous step make a mask that only had boundaries of the ROI
+            #now we step across every slice and fill holes to make the full tumor mask
+            mask_array = np.swapaxes(mask_array, 2, 0)
+            for j in range(0, mask_array.shape[0]):
+                slice_array = mask_array[j,:,:]
+                slice_array = ndimage.binary_fill_holes(slice_array)
+                mask_array[j,:,:] = slice_array.astype('uint16')
 
+            #save binary mask and T2
+            mask_out = sitk.GetImageFromArray(mask_array)
+            mask_out.CopyInformation(image)
+
+
+            #i just wrote generic names "tumor_mask" and "t2" here, you probably will want to change it to be automatically named
+            sitk.WriteImage(mask_out, os.path.join(nii_fp,stl_file.split('.stl')[0]+'.nii.gz'))
+
+        sitk.WriteImage(image, os.path.join(nii_fp, 't2.nii.gz'))
 
 
     def BinarySTL(self,fname):
@@ -107,36 +125,59 @@ class FindSeg:
 
         return Numtri, Header, Points, Normals, V0, V1, V2
 
+    def extract_stl(self,path_to_dcm,savepath):
+        '''read out the stl file'''
+
+        # get dicom object
+        dcm_obj = pydicom.dcmread(path_to_dcm)
+
+        #make dictionary of lesion information
+        lesion_info=self.describe_lesions(path_to_dcm)
+
+        # for each lesion, extract the stl data and meta-data and save
+        for i in range(len(dcm_obj[0x42011020].value)):
+            lesion_dict=lesion_info[str(i+1)]
+            name=self.make_name(lesion_dict)
+            subs = dcm_obj[0x42011020].value[i]
+            array = bytearray(subs[0x42011201].value)
+            f = open(os.path.join(savepath,name+'.stl'), 'w+b')
+            f.write(array)
 
 
-
-    def read_stl(self, filename):
-        with open(filename, 'rb') as f:
-            print(f)
-            Header = f.read(80)
-            nn = f.read(4)
-            Numtri = struct.unpack('i', nn)[0]
-            record_dtype = np.dtype([
-                ('Normals', np.float32, (3,)),
-                ('Vertex1', np.float32, (3,)),
-                ('Vertex2', np.float32, (3,)),
-                ('Vertex3', np.float32, (3,)),
-                ('atttr', '<i2', (1,)),
-            ])
-            data = np.zeros((Numtri,), dtype=record_dtype)
-            for i in range(0, Numtri, 10):
-                d = np.fromfile(f, dtype=record_dtype, count=10)
-                data[i:i + len(d)] = d
-
-        # normals = data['Normals']
-        v1 = data['Vertex1']
-        v2 = data['Vertex2']
-        v3 = data['Vertex3']
-        points = np.hstack(((v1[:, np.newaxis, :]), (v2[:, np.newaxis, :]), (v3[:, np.newaxis, :])))
-        return points
+    def describe_lesions(self, path=''):
+        '''find the private tag containing lesion information and parse data as XML and store dictionary
+        with keys of dictionary being the lesion number
+        '''
+        out_dict = {}
+        dcm_obj = pydicom.dcmread(path)
+        subs = dcm_obj[0x30060020].value
+        for roi in subs:
+            roi_dict = {}
+            ROI_n = str(int(roi[0x30060022].value))
+            if (0x4201, 0x1407) in roi:
+                root = ET.fromstring(roi[0x42011407].value)
+            elif (0x4201, 0x1403) in roi:
+                root = ET.fromstring(roi[0x42011403].value)
+            else:
+                print('dicom tag not here!')
+            for child in root:
+                roi_dict[child.tag] = child.text
+            out_dict[ROI_n] = roi_dict
+        return (out_dict)
 
 
+    def make_name(self,dict={}):
+        '''create label from dictionary output of describe_lesions'''
+
+        name=dict['COMMENTS']
+        name='-'.join(name.split(' '))
+        for val in ['OVERALL_SCORE','T2WTZ_SCORE','DWI_SCORE','DCE_SCORE','EPE','VOL','DIM']:
+            if val in dict.keys():
+                name+='_'+dict[val]
+            else:
+                name+='_NONE'
+        return name
 
 if __name__=='__main__':
     c=FindSeg()
-    c.lets_see_tumor()
+    c.process_all()
