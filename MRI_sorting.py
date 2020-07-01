@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 class ParseMRI:
 
     def __init__(self):
-        self.basePATH='/Volumes/G-SPEED Shuttle TB3/'
+        self.basePATH=''
         self.savePATH=os.path.join(self.basePATH,'sorted_dicoms')
 
 
@@ -61,7 +61,7 @@ if __name__=='__main__':
     c=ParseMRI()
     #c.remove_DS(os.path.join(c.basePATH))
     #c.describe_ds()
-    c.sort_dm_all(dir='/Volumes/G-SPEED Shuttle TB3/MRI_db/0-300')
+    c.sort_dm_all(dir='')
 
 
 
