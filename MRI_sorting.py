@@ -30,8 +30,6 @@ class ParseMRI:
         makes new directories if not already present and copies the dicom files to the new directory
         :return:
         '''
-        #filepath=os.path.join(self.basePATH,'Labarge_Kevin_J_19550613_3648187','8188128_20161116','series','IM-0002-0001.dcm')
-
         filename = os.path.basename(filepath)
         try:
             file_l = pydicom.dcmread(filepath)
