@@ -1,54 +1,65 @@
 import os
 import numpy as np
+import sys
 import pydicom
 import shutil
 from struct import unpack
-from scipy import ndimage
 import SimpleITK as sitk
+from skimage import draw
 import xml.etree.ElementTree as ET
+import scipy
+
+#authors @DrSHarmon, @T_Sanf
 
 
 class FindSeg:
 
     def __init__(self):
-        self.basePATH = ''
-        self.savePATH=''
+        self.basePATH = 'path with original images sorted with DCAD ROI as series'
+        self.savePATH='path to curated dataset'
 
     def process_all(self):
         ''' interates over all patients in directory and creates '''
 
-        for pt in os.listdir(self.basePATH)[0:10]:
+        total_lesions=0
+        logger=[]
+        for scn in os.listdir(self.savePATH):
+            roi_path=os.path.join(self.savePATH,scn,'roi')
+            if os.path.exists(roi_path) and len(os.listdir(roi_path))>0:
+                print('processing lesions for scan {}'.format(scn))
+                total_lesions+=1
+
+                #make directory for lesion if one does not already exist
+                if not os.path.exists(os.path.join(self.savePATH,scn,'nifti','mask')):
+                    os.mkdir(os.path.join(self.savePATH,scn,'nifti','mask'))
+
+                #set up all paths for saving
+                roi_fp = os.path.join(self.savePATH, scn, 'roi', os.listdir(os.path.join(self.savePATH, scn, 'roi'))[0])
+                stl_fp=os.path.join(self.savePATH,scn,'roi')
+                t2_fp=os.path.join(self.savePATH,scn,'dicoms','t2',os.listdir(os.path.join(self.savePATH,scn,'dicoms','t2'))[0])
+                nii_fp=os.path.join(self.savePATH,scn,'nifti','mask')
+
+                try:
+                    self.convert_stl_to_nifti(roi_fp, stl_fp, t2_fp, nii_fp)
+
+                except:
+                    print("problem with scan {}".format(scn))
+                    logger+=[scn]
+
+
+    def transfer_roi_file(self):
+        '''transfer all files between raw dataset and curated dataset'''
+        for pt in os.listdir(self.basePATH):
             for dt in os.listdir(os.path.join(self.basePATH,pt)):
-                for series in os.listdir(os.path.join(self.basePATH,pt,dt)):
-
-                    if series=='DCAD ROI':
-                        roi_fn=[file for file in os.listdir(os.path.join(self.basePATH,pt,dt,series)) if file.endswith('.dcm')][0]
-                        roi_fp=os.path.join(self.basePATH,pt,dt,series,roi_fn)
-
-                        #set up file structure (if it does not already exist
-                        if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt)):
-                            os.mkdir(os.path.join(self.savePATH,pt+'_'+dt))
+                if pt+'_'+dt in os.listdir(self.savePATH):
+                    for series in os.listdir(os.path.join(self.basePATH, pt, dt)):
+                        if series == 'DCAD ROI':
+                            print("DCAD series present for patient {}".format(pt))
+                            roi_fn = [file for file in os.listdir(os.path.join(self.basePATH, pt, dt, series)) if file.endswith('.dcm')][0]
+                            roi_fp = os.path.join(self.basePATH, pt, dt, series, roi_fn)
                             if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'roi')):
-                                os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'roi'))
-                            if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'nifti')):
-                                os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'nifti'))
-                                if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'nifti','mask')):
-                                    os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'nifti','mask'))
-                            if not os.path.exists(os.path.join(self.savePATH, pt + '_' + dt, 'dicom')):
-                                os.mkdir(os.path.join(self.savePATH, pt + '_' + dt, 'dicom'))
-                                if not os.path.exists(os.path.join(self.savePATH,pt+'_'+dt,'nifti','t2')):
-                                    os.mkdir(os.path.join(self.savePATH,pt+'_'+dt,'nifti','t2'))
-
-
-                        #copy ROI file to new location
-                        shutil.copy2(roi_fp,os.path.join(self.savePATH,pt+'_'+dt,'roi'))
-
-                        #set up all paths for saving
-                        stl_fp=os.path.join(self.savePATH,pt+'_'+dt,'roi')
-                        t2_fp=os.path.join(self.savePATH,pt+'_'+dt,'dicom','t2')
-                        nii_fp=os.path.join(self.savePATH,pt+'_'+dt,'nifti','mask')
-
-                        self.convert_stl_to_nifti(roi_fp, stl_fp, t2_fp, nii_fp)
+                                os.mkdir(os.path.join(self.savePATH, pt + '_' + dt, 'roi'))
+                            shutil.copy2(roi_fp,os.path.join(self.savePATH, pt + '_' + dt, 'roi'))
 
 
     def convert_stl_to_nifti(self, roi_fp, stl_fp, t2_fp,nii_fp):
@@ -56,9 +67,13 @@ class FindSeg:
 
         #get STL info
         self.extract_stl(roi_fp,stl_fp)
+
+        #get all stl files in the location
         stl_files = [file for file in os.listdir(stl_fp) if file.endswith('.stl')]
         for stl_file in stl_files:
             stl_fp_l=os.path.join(stl_fp,stl_file)
+
+            #get vertices
             num, h, p, n, v0, v1, v2 = self.BinarySTL(stl_fp_l)
             all_verts = np.concatenate((v0,v1,v2))
 
@@ -68,28 +83,24 @@ class FindSeg:
             reader.SetFileNames(dicom_names)
             image = reader.Execute()
 
-            #create mask from image file
+            #create mask from t2 image file dimensions
             img_array = sitk.GetArrayFromImage(image)
             img_array = np.swapaxes(img_array, 2, 0)
             mask_array = np.zeros(img_array.shape)
+
             #this is not very elegant, basically cast all individual points to their matrix index
             for vertex in all_verts:
                 ind = np.round(np.asarray(image.TransformPhysicalPointToContinuousIndex(vertex.tolist())),1)
-                if ind[2].is_integer(): #skip indices that are inbetween z slices (interpolated probably)
-                    mask_array[int(ind[0]),int(ind[1]),int(ind[2])]=1
+                mask_array[int(ind[0]),int(ind[1]),int(ind[2])]=1
 
             #the previous step make a mask that only had boundaries of the ROI
             #now we step across every slice and fill holes to make the full tumor mask
             mask_array = np.swapaxes(mask_array, 2, 0)
-            for j in range(0, mask_array.shape[0]):
-                slice_array = mask_array[j,:,:]
-                slice_array = ndimage.binary_fill_holes(slice_array)
-                mask_array[j,:,:] = slice_array.astype('uint16')
+            array_out=self.flood_fill_hull(mask_array)[0]
 
             #save binary mask and T2
-            mask_out = sitk.GetImageFromArray(mask_array)
+            mask_out = sitk.GetImageFromArray(array_out)
             mask_out.CopyInformation(image)
-
 
             #i just wrote generic names "tumor_mask" and "t2" here, you probably will want to change it to be automatically named
             sitk.WriteImage(mask_out, os.path.join(nii_fp,stl_file.split('.stl')[0]+'.nii.gz'))
@@ -165,7 +176,6 @@ class FindSeg:
             out_dict[ROI_n] = roi_dict
         return (out_dict)
 
-
     def make_name(self,dict={}):
         '''create label from dictionary output of describe_lesions'''
 
@@ -177,6 +187,22 @@ class FindSeg:
             else:
                 name+='_NONE'
         return name
+
+    def poly2mask(self,vertex_row_coords, vertex_col_coords, shape):
+        fill_row_coords, fill_col_coords = draw.polygon(vertex_row_coords, vertex_col_coords, shape)
+        mask = np.zeros(shape, dtype=np.bool)
+        mask[fill_row_coords, fill_col_coords] = True
+        return mask
+
+    def flood_fill_hull(self,image):
+        points = np.transpose(np.where(image==1))
+        hull = scipy.spatial.ConvexHull(points)
+        deln = scipy.spatial.Delaunay(points[hull.vertices])
+        idx = np.stack(np.indices(image.shape), axis=-1)
+        out_idx = np.nonzero(deln.find_simplex(idx) + 1)
+        out_img = np.zeros(image.shape)
+        out_img[out_idx] = 1
+        return out_img, hull
 
 if __name__=='__main__':
     c=FindSeg()
